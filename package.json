@@ -1,5 +1,5 @@
 {
-  "name": "scrollmonitor",
+  "name": "scroll-monitor",
   "version": "1.0.8",
   "author": "Stu Kabakoff <stukabakoff@gmail.com>",
   "description": "A simple and fast API to monitor DOM elements as you scroll",

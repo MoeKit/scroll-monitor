@@ -8,11 +8,14 @@
 		window.scrollMonitor = factory( jQuery );
 	}
 })(function( $ ) {
-	
+
+	var scrollTop = function() {
+		return window.pageYOffset ||
+			(document.documentElement && document.documentElement.scrollTop) ||
+			document.body.scrollTop;
+	};
+
 	var exports = {};
-	
-	var $window = $(window);
-	var $document = $(document);
 
 	var watchers = [];
 
@@ -36,23 +39,33 @@
 
 	var defaultOffsets = {top: 0, bottom: 0};
 
-	exports.viewportTop;
-	exports.viewportBottom;
-	exports.documentHeight;
-	exports.viewportHeight = windowHeight();
+	var getViewportHeight = function() {
+		return window.innerHeight || document.documentElement.clientHeight;
+	};
+
+	var getDocumentHeight = function() {
+		// jQuery approach
+		// whichever is greatest
+		return Math.max(
+			document.body.scrollHeight, document.documentElement.scrollHeight,
+			document.body.offsetHeight, document.documentElement.offsetHeight,
+			document.documentElement.clientHeight
+		);
+	};
+
+	exports.viewportTop = null;
+	exports.viewportBottom = null;
+	exports.documentHeight = null;
+	exports.viewportHeight = getViewportHeight();
 
 	var previousDocumentHeight;
 	var latestEvent;
 
-	function windowHeight() {
-		return window.innerHeight || document.documentElement.clientHeight;
-	}
-
 	var calculateViewportI;
 	function calculateViewport() {
-		exports.viewportTop = $window.scrollTop();
+		exports.viewportTop = scrollTop();
 		exports.viewportBottom = exports.viewportTop + exports.viewportHeight;
-		exports.documentHeight = $document.height();
+		exports.documentHeight = getDocumentHeight();
 		if (exports.documentHeight !== previousDocumentHeight) {
 			calculateViewportI = watchers.length;
 			while( calculateViewportI-- ) {
@@ -63,7 +76,7 @@
 	}
 
 	function recalculateWatchLocationsAndTrigger() {
-		exports.viewportHeight = windowHeight();
+		exports.viewportHeight = getViewportHeight();
 		calculateViewport();
 		updateAndTriggerWatchers();
 	}
@@ -93,13 +106,16 @@
 		var self = this;
 
 		this.watchItem = watchItem;
-		
+
 		if (!offsets) {
 			this.offsets = defaultOffsets;
 		} else if (offsets === +offsets) {
 			this.offsets = {top: offsets, bottom: offsets};
 		} else {
-			this.offsets = $.extend({}, defaultOffsets, offsets);
+			this.offsets = {
+				top: offsets.top || defaultOffsets.top,
+				bottom: offsets.bottom || defaultOffsets.bottom
+			};
 		}
 
 		this.callbacks = {}; // {callback: function, isOne: true }
@@ -131,7 +147,7 @@
 			}
 		}
 		this.triggerCallbacks = function triggerCallbacks() {
-			
+
 			if (this.isInViewport && !wasInViewport) {
 				triggerCallbackArray( this.callbacks[ENTERVIEWPORT] );
 			}
@@ -139,12 +155,12 @@
 				triggerCallbackArray( this.callbacks[FULLYENTERVIEWPORT] );
 			}
 
-			
-			if (this.isAboveViewport !== wasAboveViewport && 
+
+			if (this.isAboveViewport !== wasAboveViewport &&
 				this.isBelowViewport !== wasBelowViewport) {
 
 				triggerCallbackArray( this.callbacks[VISIBILITYCHANGE] );
-				
+
 				// if you skip completely past this element
 				if (!wasFullyInViewport && !this.isFullyInViewport) {
 					triggerCallbackArray( this.callbacks[FULLYENTERVIEWPORT] );
@@ -191,10 +207,10 @@
 				if (cachedDisplay === 'none') {
 					this.watchItem.style.display = '';
 				}
-				
-				var elementLocation = $(this.watchItem).offset();
-				this.top = elementLocation.top;
-				this.bottom = elementLocation.top + this.watchItem.offsetHeight;
+
+				var boundingRect = this.watchItem.getBoundingClientRect();
+				this.top = boundingRect.top + exports.viewportTop;
+				this.bottom = boundingRect.bottom + exports.viewportTop;
 
 				if (cachedDisplay === 'none') {
 					this.watchItem.style.display = cachedDisplay;
@@ -240,14 +256,14 @@
 				case event === FULLYENTERVIEWPORT && this.isFullyInViewport:
 				case event === EXITVIEWPORT && this.isAboveViewport && !this.isInViewport:
 				case event === PARTIALLYEXITVIEWPORT && this.isAboveViewport:
-					callback();
+					callback.call( this, latestEvent );
 					if (isOne) {
 						return;
 					}
 			}
 
 			if (this.callbacks[event]) {
-				this.callbacks[event].push({callback: callback, isOne: isOne});
+				this.callbacks[event].push({callback: callback, isOne: isOne||false});
 			} else {
 				throw new Error('Tried to add a scroll monitor listener of type '+event+'. Your options are: '+eventTypes.join(', '));
 			}
@@ -311,7 +327,11 @@
 	try {
 		calculateViewport();
 	} catch (e) {
-		$(calculateViewport);
+		try {
+			window.$(calculateViewport);
+		} catch (e) {
+			throw new Error('If you must put scrollMonitor in the <head>, you must use jQuery.');
+		}
 	}
 
 	function scrollMonitorListener(event) {
@@ -320,16 +340,22 @@
 		updateAndTriggerWatchers();
 	}
 
-	$window.on('scroll', scrollMonitorListener);
-	$window.on('resize', debouncedRecalcuateAndTrigger);
+	if (window.addEventListener) {
+		window.addEventListener('scroll', scrollMonitorListener);
+		window.addEventListener('resize', debouncedRecalcuateAndTrigger);
+	} else {
+		// Old IE support
+		window.attachEvent('onscroll', scrollMonitorListener);
+		window.attachEvent('onresize', debouncedRecalcuateAndTrigger);
+	}
 
 	exports.beget = exports.create = function( element, offsets ) {
 		if (typeof element === 'string') {
-			element = $(element)[0];
-		}
-		if (element instanceof $) {
+			element = document.querySelector(element);
+		} else if (element && element.length > 0) {
 			element = element[0];
 		}
+
 		var watcher = new ElementWatcher( element, offsets );
 		watchers.push(watcher);
 		watcher.update();
@@ -345,6 +371,6 @@
 		exports.documentHeight = 0;
 		exports.update();
 	};
-	
+
 	return exports;
 });
